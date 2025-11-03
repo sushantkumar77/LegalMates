@@ -30,7 +30,7 @@ try:
         # This is the CORRECT URL to fix the 405 error
         base_url="https://api.cohere.ai/compatibility/v1" 
     )
-    COHERE_MODEL = "command-r"  # Use a powerful Cohere model
+    COHERE_MODEL = "command-r-plus"  # <-- Use the new flagship model  # Use a powerful Cohere model
     # --- END CLIENT CONFIGURATION ---
 except Exception as e:
     st.error(f"Failed to configure Cohere-compatible client: {e}")
