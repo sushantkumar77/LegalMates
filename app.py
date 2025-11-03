@@ -23,13 +23,13 @@ if not COHERE_API_KEY:
     st.stop()
 
 try:
-    # --- CONFIGURE OPENAI CLIENT FOR COHERE ---
-    client = OpenAI(
-        api_key=COHERE_API_KEY,
-        base_url="https://api.cohere.com/v1"  # <-- This is the magic part
-    )
-    COHERE_MODEL = "command-r"  # <-- Use a powerful Cohere model
-    # --- END CLIENT CONFIGURATION ---
+   # --- CONFIGURE OPENAI CLIENT FOR COHERE ---
+client = OpenAI(
+    api_key=COHERE_API_KEY,
+    base_url="https://api.cohere.ai/compatibility/v1"  # <-- THIS IS CORRECT
+)
+COHERE_MODEL = "command-r"
+# --- END CLIENT CONFIGURATION ---
 except Exception as e:
     st.error(f"Failed to configure Cohere-compatible client: {e}")
     st.stop()
