@@ -4,18 +4,18 @@ import os
 import io
 import re
 from dotenv import load_dotenv
-from openai import OpenAI  # <-- We use the OpenAI library
+from openai import OpenAI  # We use the OpenAI library to call Cohere
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="LegalEase AI (Cohere)",
+    page_title="LegalEase AI (Smart Chat)",
     page_icon="✍️",
     layout="wide"
 )
 
 # --- Environment Variable & API Key ---
 load_dotenv()
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")  # <-- CHANGED
+COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
 # Check for API key
 if not COHERE_API_KEY:
@@ -23,20 +23,26 @@ if not COHERE_API_KEY:
     st.stop()
 
 try:
-   # --- CONFIGURE OPENAI CLIENT FOR COHERE ---
+    # --- CONFIGURE OPENAI CLIENT FOR COHERE ---
+    # This setup points the standard OpenAI library to Cohere's API
     client = OpenAI(
-    api_key=COHERE_API_KEY,
-    base_url="https://api.cohere.ai/compatibility/v1"  # <-- THIS IS CORRECT
-)
-COHERE_MODEL = "command-r"
-# --- END CLIENT CONFIGURATION ---
+        api_key=COHERE_API_KEY,
+        # This is the CORRECT URL to fix the 405 error
+        base_url="https://api.cohere.ai/compatibility/v1" 
+    )
+    COHERE_MODEL = "command-r"  # Use a powerful Cohere model
+    # --- END CLIENT CONFIGURATION ---
 except Exception as e:
     st.error(f"Failed to configure Cohere-compatible client: {e}")
     st.stop()
 
-# --- Helper Functions (No changes here) ---
+# --- Helper Functions ---
 
 def extract_text_and_placeholders(file_bytes):
+    """
+    Extracts text and unique placeholders from a .docx file.
+    This regex is much more robust and covers most common syntaxes.
+    """
     try:
         doc = docx.Document(io.BytesIO(file_bytes))
         full_text = []
@@ -47,15 +53,31 @@ def extract_text_and_placeholders(file_bytes):
                 for cell in row.cells:
                     for para in cell.paragraphs:
                         full_text.append(para.text)
+        
         full_text_str = "\n".join(full_text)
-        placeholder_regex = r"\{.*?\}|\[.*?\]|<.*?>"
-        placeholders = list(set(re.findall(placeholder_regex, full_text_str)))
+        
+        # --- NEW ROBUST REGEX ---
+        # This covers:
+        # {{placeholder}} and {placeholder}
+        # [placeholder]
+        # <placeholder>
+        # %placeholder%
+        # __placeholder__
+        # $placeholder (common variable syntax)
+        placeholder_regex = r"\{{1,2}.*?\}{1,2}|\[.*?\]|<.*?>|%.*?%|__.*?__|\$[a-zA-Z0-9_]+"
+        
+        placeholders = list(set(re.findall(placeholder_regex, full_text_str))) # Unique list
+        
         return full_text_str, placeholders
     except Exception as e:
         st.error(f"Error reading .docx file: {e}")
         return None, []
 
 def replace_placeholders_in_doc(file_bytes, replacements):
+    """
+    Replaces placeholders in a docx file (in memory) and returns the new file bytes.
+    This function replaces text while attempting to preserve formatting by operating on runs.
+    """
     try:
         doc = docx.Document(io.BytesIO(file_bytes))
         for p in doc.paragraphs:
@@ -82,6 +104,7 @@ def replace_placeholders_in_doc(file_bytes, replacements):
         return None
 
 def clear_session_state_on_upload():
+    """Resets the session state when a new file is uploaded."""
     keys_to_clear = [
         "messages", "placeholders", "filled_values", 
         "current_placeholder_index", "original_doc_bytes", 
@@ -90,33 +113,38 @@ def clear_session_state_on_upload():
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
+    
+    # Re-initialize with the smart system prompt
     st.session_state.messages = []
     st.session_state.placeholders = []
     st.session_state.filled_values = {}
     st.session_state.current_placeholder_index = 0
-    st.session_state.api_history = []
+    st.session_state.api_history = [
+        {
+            "role": "system",
+            "content": """
+            You are a helpful and friendly assistant named 'LegalEase AI'. 
+            Your goal is to help a user fill in a document. 
+            I will give you placeholders one by one, like '{ClientName}' or '[DocumentDate]'.
+            Your job is to ask the user for the information to fill these placeholders.
+            
+            RULES:
+            1.  Be conversational and natural. For example, instead of "What is {ClientName}?", ask "Who is the client for this agreement?" or "What's the client's full name?".
+            2.  Ask for only ONE piece of information at a time.
+            3.  When the user answers, confirm briefly (e.g., "Got it.", "Perfect.") and then immediately ask the question for the *next* placeholder I give you.
+            4.  Keep your questions clear and concise.
+            """
+        }
+    ]
 
 # --- Session State Initialization ---
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "placeholders" not in st.session_state:
-    st.session_state.placeholders = []
-if "filled_values" not in st.session_state:
-    st.session_state.filled_values = {}
-if "current_placeholder_index" not in st.session_state:
-    st.session_state.current_placeholder_index = 0
-if "original_doc_bytes" not in st.session_state:
-    st.session_state.original_doc_bytes = None
-if "original_text" not in st.session_state:
-    st.session_state.original_text = ""
-if "api_history" not in st.session_state:
-    st.session_state.api_history = [
-        {"role": "system", "content": "You are a helpful assistant. You ask simple, one-sentence questions to fill in document placeholders."}
-    ]
+    clear_session_state_on_upload() # This will run on first load
+
 
 # --- Main App UI ---
-st.title("✍️ LegalEase AI: Conversational Document Filler (Cohere)")
-st.markdown("Upload your `.docx` template, and I'll help you fill in the blanks conversationally.")
+st.title("✍️ LegalEase AI: Conversational Document Filler")
+st.markdown("Upload your `.docx` template, and I'll help you fill in the blanks with a smart, conversational AI.")
 
 col1, col2 = st.columns([1, 1], gap="large")
 
@@ -127,7 +155,7 @@ with col1:
     uploaded_file = st.file_uploader(
         "Upload your .docx template", 
         type=["docx"],
-        on_change=clear_session_state_on_upload
+        on_change=clear_session_state_on_upload # Reset session on new file
     )
 
     if uploaded_file is not None and st.session_state.original_doc_bytes is None:
@@ -149,12 +177,14 @@ with col1:
                 with st.expander("Click to see all found placeholders"):
                     st.write(placeholders)
                 
+                # --- NEW SMART KICK-OFF PROMPT ---
                 first_ph = st.session_state.placeholders[0]
-                prompt = f"I need to ask the user for a value for '{first_ph}'. Ask a simple, friendly question. For example, if it's '{{ClientName}}', ask 'What is the client's full name?'. Keep it brief."
+                # This prompt tells the AI (which has the system prompt) to start the job.
+                prompt_to_ai = f"Hello! I've uploaded a document. Here is the first placeholder: '{first_ph}'. Please ask me the first question."
                 
                 try:
-                    # --- COHERE API CALL (using OpenAI library) ---
-                    st.session_state.api_history.append({"role": "user", "content": prompt})
+                    # Add our instruction to the AI's history
+                    st.session_state.api_history.append({"role": "user", "content": prompt_to_ai})
                     
                     response = client.chat.completions.create(
                         messages=st.session_state.api_history,
@@ -163,48 +193,50 @@ with col1:
                     
                     response_text = response.choices[0].message.content
                     
+                    # Add AI's response to both histories
                     st.session_state.api_history.append({"role": "assistant", "content": response_text})
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
-                    # --- END API CALL ---
                     
                 except Exception as e:
                     st.error(f"Error with Cohere API: {e}")
-                    # Clear history on error to avoid confusion
-                    st.session_state.api_history = [] 
 
+    # --- Conversational Chat ---
     if st.session_state.original_doc_bytes is not None and st.session_state.placeholders:
         st.markdown("---")
         st.subheader("💬 Chat to Fill")
 
+        # Display chat history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
+        # Chat input
         if prompt := st.chat_input("Your answer..."):
+            # Add user's answer to both histories
             st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            st.session_state.api_history.append({"role": "user", "content": prompt})
 
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
+                        # Store the value
                         current_index = st.session_state.current_placeholder_index
                         current_ph = st.session_state.placeholders[current_index]
                         st.session_state.filled_values[current_ph] = prompt
                         
+                        # Move to the next placeholder
                         st.session_state.current_placeholder_index += 1
                         next_index = st.session_state.current_placeholder_index
                         
-                        # Add user's last answer to history
-                        st.session_state.api_history.append({"role": "user", "content": prompt})
-                        
                         if next_index < len(st.session_state.placeholders):
+                            # --- NEW SMART NEXT-QUESTION PROMPT ---
                             next_ph = st.session_state.placeholders[next_index]
-                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. Now, ask a simple, friendly question for the next placeholder: '{next_ph}'. Keep it brief."
+                            ai_prompt = f"The next placeholder is: '{next_ph}'. Please ask me the question for this one."
                         else:
-                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. That was the last placeholder. Let the user know all fields are filled. Keep your response brief."
+                            # --- NEW SMART FINAL PROMPT ---
+                            ai_prompt = "That was the last placeholder! Please provide a brief, friendly message letting me know I'm all done and can review the document on the right."
 
-                        # --- COHERE API CALL (using OpenAI library) ---
+                        # Add our new instruction to the AI's history
                         st.session_state.api_history.append({"role": "user", "content": ai_prompt})
                         
                         response = client.chat.completions.create(
@@ -214,17 +246,17 @@ with col1:
                         
                         response_text = response.choices[0].message.content
                         
+                        # Add AI's response to both histories
                         st.session_state.api_history.append({"role": "assistant", "content": response_text})
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
-                        # --- END API CALL ---
                         
                         st.markdown(response_text)
                     
                     except Exception as e:
                         st.error(f"Error with Cohere API: {e}")
-                        st.session_state.current_placeholder_index -= 1
+                        st.session_state.current_placeholder_index -= 1 # Roll back on error
 
-# --- Column 2: Review & Download (No changes here) ---
+# --- Column 2: Review & Download (No changes needed) ---
 with col2:
     st.header("2. Review & Download")
     
@@ -234,11 +266,14 @@ with col2:
         with st.container(height=500, border=True):
             st.subheader("Live Preview")
             preview_text = st.session_state.original_text
+            
             for ph, val in st.session_state.filled_values.items():
-                preview_text = preview_text.replace(ph, f"**{val}**")
+                preview_text = preview_text.replace(ph, f"**{val}**") # Bold filled values
+            
             for ph in st.session_state.placeholders:
                 if ph not in st.session_state.filled_values:
-                    preview_text = preview_text.replace(ph, f"_{ph}_")
+                    preview_text = preview_text.replace(ph, f"_{ph}_") # Italicize unfilled
+
             st.markdown(preview_text)
         
         st.markdown("---")
