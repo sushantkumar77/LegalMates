@@ -1,4 +1,4 @@
 streamlit
 python-docx
 python-dotenv
-perplexity-ai
+openai
