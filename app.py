@@ -56,14 +56,8 @@ def extract_text_and_placeholders(file_bytes):
         
         full_text_str = "\n".join(full_text)
         
-        # --- NEW ROBUST REGEX ---
-        # This covers:
-        # {{placeholder}} and {placeholder}
-        # [placeholder]
-        # <placeholder>
-        # %placeholder%
-        # __placeholder__
-        # $placeholder (common variable syntax)
+        # --- ROBUST REGEX ---
+        # Covers: {placeholder}, {{placeholder}}, [placeholder], <placeholder>, %placeholder%, __placeholder__, $placeholder
         placeholder_regex = r"\{{1,2}.*?\}{1,2}|\[.*?\]|<.*?>|%.*?%|__.*?__|\$[a-zA-Z0-9_]+"
         
         placeholders = list(set(re.findall(placeholder_regex, full_text_str))) # Unique list
@@ -119,6 +113,8 @@ def clear_session_state_on_upload():
     st.session_state.placeholders = []
     st.session_state.filled_values = {}
     st.session_state.current_placeholder_index = 0
+    st.session_state.original_doc_bytes = None  # <-- FIX
+    st.session_state.original_text = ""          # <-- FIX
     st.session_state.api_history = [
         {
             "role": "system",
@@ -138,8 +134,31 @@ def clear_session_state_on_upload():
     ]
 
 # --- Session State Initialization ---
+# This block now explicitly initializes all keys on the first run.
 if "messages" not in st.session_state:
-    clear_session_state_on_upload() # This will run on first load
+    st.session_state.messages = []
+    st.session_state.placeholders = []
+    st.session_state.filled_values = {}
+    st.session_state.current_placeholder_index = 0
+    st.session_state.original_doc_bytes = None  # <-- FIX
+    st.session_state.original_text = ""          # <-- FIX
+    st.session_state.api_history = [
+        {
+            "role": "system",
+            "content": """
+            You are a helpful and friendly assistant named 'LegalEase AI'. 
+            Your goal is to help a user fill in a document. 
+            I will give you placeholders one by one, like '{ClientName}' or '[DocumentDate]'.
+            Your job is to ask the user for the information to fill these placeholders.
+            
+            RULES:
+            1.  Be conversational and natural. For example, instead of "What is {ClientName}?", ask "Who is the client for this agreement?" or "What's the client's full name?".
+            2.  Ask for only ONE piece of information at a time.
+            3.  When the user answers, confirm briefly (e.g., "Got it.", "Perfect.") and then immediately ask the question for the *next* placeholder I give you.
+            4.  Keep your questions clear and concise.
+            """
+        }
+    ]
 
 
 # --- Main App UI ---
@@ -177,7 +196,7 @@ with col1:
                 with st.expander("Click to see all found placeholders"):
                     st.write(placeholders)
                 
-                # --- NEW SMART KICK-OFF PROMPT ---
+                # --- SMART KICK-OFF PROMPT ---
                 first_ph = st.session_state.placeholders[0]
                 # This prompt tells the AI (which has the system prompt) to start the job.
                 prompt_to_ai = f"Hello! I've uploaded a document. Here is the first placeholder: '{first_ph}'. Please ask me the first question."
@@ -229,11 +248,11 @@ with col1:
                         next_index = st.session_state.current_placeholder_index
                         
                         if next_index < len(st.session_state.placeholders):
-                            # --- NEW SMART NEXT-QUESTION PROMPT ---
+                            # --- SMART NEXT-QUESTION PROMPT ---
                             next_ph = st.session_state.placeholders[next_index]
                             ai_prompt = f"The next placeholder is: '{next_ph}'. Please ask me the question for this one."
                         else:
-                            # --- NEW SMART FINAL PROMPT ---
+                            # --- SMART FINAL PROMPT ---
                             ai_prompt = "That was the last placeholder! Please provide a brief, friendly message letting me know I'm all done and can review the document on the right."
 
                         # Add our new instruction to the AI's history
