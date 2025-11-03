@@ -24,7 +24,7 @@ if not COHERE_API_KEY:
 
 try:
    # --- CONFIGURE OPENAI CLIENT FOR COHERE ---
-client = OpenAI(
+    client = OpenAI(
     api_key=COHERE_API_KEY,
     base_url="https://api.cohere.ai/compatibility/v1"  # <-- THIS IS CORRECT
 )
