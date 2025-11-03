@@ -1,35 +1,35 @@
 import streamlit as st
-import google.generativeai as genai
 import docx
 import os
 import io
 import re
 from dotenv import load_dotenv
+from groq import Groq  # Import Groq
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="LegalEase AI",
+    page_title="LegalEase AI (Groq)",
     page_icon="✍️",
     layout="wide"
 )
 
 # --- Environment Variable & API Key ---
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # <-- CHANGED
 
-# Check for API key and configure Gemini
-if not GEMINI_API_KEY:
-    st.error("🚨 GEMINI_API_KEY not found. Please set it in your .env file or Streamlit secrets.")
+# Check for API key and configure Groq client
+if not GROQ_API_KEY:
+    st.error("🚨 GROQ_API_KEY not found. Please set it in your .env file or Streamlit secrets.")
     st.stop()
 
 try:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.0-pro')
+    client = Groq(api_key=GROQ_API_KEY)  # <-- CHANGED
+    GROQ_MODEL = "mixtral-8x7b-32768"  # <-- You can change this model
 except Exception as e:
-    st.error(f"Failed to configure Gemini API: {e}")
+    st.error(f"Failed to configure Groq API: {e}")
     st.stop()
 
-# --- Helper Functions ---
+# --- Helper Functions (No changes here) ---
 
 def extract_text_and_placeholders(file_bytes):
     """
@@ -110,7 +110,7 @@ def clear_session_state_on_upload():
     keys_to_clear = [
         "messages", "placeholders", "filled_values", 
         "current_placeholder_index", "original_doc_bytes", 
-        "original_text", "chat_session"
+        "original_text", "api_history"  # <-- CHANGED
     ]
     for key in keys_to_clear:
         if key in st.session_state:
@@ -120,7 +120,7 @@ def clear_session_state_on_upload():
     st.session_state.placeholders = []
     st.session_state.filled_values = {}
     st.session_state.current_placeholder_index = 0
-    st.session_state.chat_session = model.start_chat(history=[])
+    st.session_state.api_history = []  # <-- CHANGED
 
 
 # --- Session State Initialization ---
@@ -136,12 +136,12 @@ if "original_doc_bytes" not in st.session_state:
     st.session_state.original_doc_bytes = None
 if "original_text" not in st.session_state:
     st.session_state.original_text = ""
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = model.start_chat(history=[])
+if "api_history" not in st.session_state:  # <-- CHANGED
+    st.session_state.api_history = []
 
 
 # --- Main App UI ---
-st.title("✍️ LegalEase AI: Conversational Document Filler")
+st.title("✍️ LegalEase AI: Conversational Document Filler (Groq Edition)")
 st.markdown("Upload your `.docx` template, and I'll help you fill in the blanks conversationally.")
 
 # --- Layout ---
@@ -181,13 +181,25 @@ with col1:
                 
                 # Kick off the chat
                 first_ph = st.session_state.placeholders[0]
-                prompt = f"I need to ask the user for a value for the placeholder '{first_ph}'. Ask me a simple, friendly question to get this information. For example, if the placeholder is '{{ClientName}}', you could ask 'What is the client's full name?'."
+                prompt = f"I need to ask the user for a value for the placeholder '{first_ph}'. Ask me a simple, friendly question to get this information. For example, if the placeholder is '{{ClientName}}', you could ask 'What is the client's full name?'. Keep your question brief."
                 
                 try:
-                    response = st.session_state.chat_session.send_message(prompt)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    # --- GROQ API CALL ---
+                    st.session_state.api_history.append({"role": "user", "content": prompt})
+                    
+                    response = client.chat.completions.create(
+                        messages=st.session_state.api_history,
+                        model=GROQ_MODEL
+                    )
+                    
+                    response_text = response.choices[0].message.content
+                    
+                    st.session_state.api_history.append({"role": "assistant", "content": response_text})
+                    st.session_state.messages.append({"role": "assistant", "content": response_text})
+                    # --- END GROQ CALL ---
+                    
                 except Exception as e:
-                    st.error(f"Error with Gemini API: {e}")
+                    st.error(f"Error with Groq API: {e}")
 
     # Step 2: Conversational Chat
     if st.session_state.original_doc_bytes is not None and st.session_state.placeholders:
@@ -223,24 +235,33 @@ with col1:
                         if next_index < len(st.session_state.placeholders):
                             # Ask for the next one
                             next_ph = st.session_state.placeholders[next_index]
-                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. Now, ask me a simple, friendly question for the next placeholder: '{next_ph}'."
-                            response = st.session_state.chat_session.send_message(ai_prompt)
-                            response_text = response.text
+                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. Now, ask me a simple, friendly question for the next placeholder: '{next_ph}'. Keep your question brief."
                         else:
                             # We are done!
-                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. That was the last placeholder. Let the user know all fields are filled and they can review and download the document on the right."
-                            response = st.session_state.chat_session.send_message(ai_prompt)
-                            response_text = response.text
+                            ai_prompt = f"Great. The user provided '{prompt}' for '{current_ph}'. That was the last placeholder. Let the user know all fields are filled and they can review and download the document on the right. Keep your response brief."
 
+                        # --- GROQ API CALL ---
+                        st.session_state.api_history.append({"role": "user", "content": ai_prompt})
+                        
+                        response = client.chat.completions.create(
+                            messages=st.session_state.api_history,
+                            model=GROQ_MODEL
+                        )
+                        
+                        response_text = response.choices[0].message.content
+                        
+                        st.session_state.api_history.append({"role": "assistant", "content": response_text})
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
+                        # --- END GROQ CALL ---
+                        
                         st.markdown(response_text)
                     
                     except Exception as e:
-                        st.error(f"Error with Gemini API: {e}")
+                        st.error(f"Error with Groq API: {e}")
                         st.session_state.current_placeholder_index -= 1 # Roll back index on error
 
 
-# --- Column 2: Review & Download ---
+# --- Column 2: Review & Download (No changes here) ---
 with col2:
     st.header("2. Review & Download")
     
